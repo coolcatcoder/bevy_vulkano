@@ -90,7 +90,7 @@ impl BevyVulkanoWindows {
 
                 let logical_size = LogicalSize::new(window.width(), window.height());
                 if let Some(sf) = window.resolution.scale_factor_override() {
-                    winit_window_builder.with_inner_size(logical_size.to_physical::<f64>(sf))
+                    winit_window_builder.with_inner_size(logical_size.to_physical::<f64>(sf as f64))
                 } else {
                     winit_window_builder.with_inner_size(logical_size)
                 }
@@ -346,7 +346,7 @@ pub fn winit_window_position(
                 // Logical to physical window size
                 let (width, height): (u32, u32) =
                     LogicalSize::new(resolution.width(), resolution.height())
-                        .to_physical::<u32>(scale_factor)
+                        .to_physical::<u32>(scale_factor as f64)
                         .into();
 
                 let position = PhysicalPosition {
@@ -382,7 +382,7 @@ fn window_descriptor_to_vulkano_window_descriptor(
         max_width: wd.resize_constraints.max_width,
         max_height: wd.resize_constraints.max_height,
     };
-    window_descriptor.scale_factor_override = wd.resolution.scale_factor_override();
+    window_descriptor.scale_factor_override = wd.resolution.scale_factor_override().map(|r| {r as f64});
     window_descriptor.title = wd.title.clone();
     window_descriptor.present_mode = match wd.present_mode {
         PresentMode::Fifo => vulkano::swapchain::PresentMode::Fifo,

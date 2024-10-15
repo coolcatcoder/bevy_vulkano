@@ -150,7 +150,7 @@ fn run_compute_shader_once_then_exit(
     }
 
     // Exit
-    app_exit_events.send(AppExit);
+    app_exit_events.send(AppExit::Success);
 
     println!("Compute shader successfully ran, exiting the example");
 }

@@ -1,7 +1,7 @@
 use bevy::{
     app::PluginGroupBuilder,
     prelude::*,
-    window::{close_on_esc, PrimaryWindow, WindowMode},
+    window::{PrimaryWindow, WindowMode},
 };
 use bevy_vulkano::{
     egui_winit_vulkano::egui, BevyVulkanoSettings, BevyVulkanoWindows, VulkanoWinitPlugin,
@@ -26,7 +26,7 @@ fn main() {
     App::new()
         .insert_non_send_resource(BevyVulkanoSettings {
             // Since we're only drawing gui, let's clear each frame
-            is_gui_overlay: true,
+            //is_gui_overlay: true,
             ..BevyVulkanoSettings::default()
         })
         .add_plugins(PluginBundle.set(WindowPlugin {
@@ -40,13 +40,13 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Update, close_on_esc)
+        //.add_systems(Update, close_on_esc)
         .add_systems(Update, create_new_window_system)
         .add_systems(PostUpdate, main_render_system_primary_window)
         .run();
 }
 
-fn create_new_window_system(mut commands: Commands, keys: Res<Input<KeyCode>>) {
+fn create_new_window_system(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_released(KeyCode::Space) {
         commands.spawn(Window {
             resolution: (512.0, 512.0).into(),

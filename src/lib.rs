@@ -82,13 +82,13 @@ impl Plugin for VulkanoWinitPlugin {
 
         // Retrieve config, or use default.
         let config = if app
-            .world
+            .world()
             .get_non_send_resource::<BevyVulkanoSettings>()
             .is_none()
         {
             BevyVulkanoSettings::default()
         } else {
-            app.world
+            app.world_mut()
                 .remove_non_send_resource::<BevyVulkanoSettings>()
                 .unwrap()
         };
@@ -134,7 +134,7 @@ impl Plugin for VulkanoWinitPlugin {
             NonSendMut<BevyVulkanoWindows>,
             Res<BevyVulkanoContext>,
             NonSend<BevyVulkanoSettings>,
-        )> = SystemState::from_world(&mut app.world);
+        )> = SystemState::from_world(app.world_mut());
 
         // And for ios and macos, we should not create window early, all ui related code should be executed inside
         // UIApplicationMain/NSApplicationMain.
@@ -148,7 +148,7 @@ impl Plugin for VulkanoWinitPlugin {
                 vulkano_windows,
                 context,
                 settings,
-            ) = create_window_system_state.get_mut(&mut app.world);
+            ) = create_window_system_state.get_mut(app.world_mut());
 
             // Here we need to create a winit-window and give it a WindowHandle which the renderer can use.
             // It needs to be spawned before the start of the startup schedule, so we cannot use a regular system.
@@ -164,7 +164,7 @@ impl Plugin for VulkanoWinitPlugin {
             );
         }
 
-        create_window_system_state.apply(&mut app.world);
+        create_window_system_state.apply(app.world_mut());
     }
 }
 
@@ -261,27 +261,27 @@ impl Default for WinitPersistentState {
     }
 }
 
-pub fn winit_runner(mut app: App) {
+pub fn winit_runner(mut app: App) -> AppExit {
     let mut event_loop = app
-        .world
+        .world_mut()
         .remove_non_send_resource::<EventLoop<()>>()
         .unwrap();
 
     let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
     let mut redraw_event_reader = ManualEventReader::<RequestRedraw>::default();
     let mut winit_state = WinitPersistentState::default();
-    app.world
+    app.world_mut()
         .insert_non_send_resource(event_loop.create_proxy());
 
     let return_from_run = app
-        .world
+        .world()
         .non_send_resource::<BevyVulkanoSettings>()
         .return_from_run;
 
     trace!("Entering winit event loop");
 
     let mut focused_window_state: SystemState<(NonSend<BevyVulkanoSettings>, Query<&Window>)> =
-        SystemState::from_world(&mut app.world);
+        SystemState::from_world(app.world_mut());
 
     let mut create_window_system_state: SystemState<(
         Commands,
@@ -290,7 +290,7 @@ pub fn winit_runner(mut app: App) {
         NonSendMut<BevyVulkanoWindows>,
         Res<BevyVulkanoContext>,
         NonSend<BevyVulkanoSettings>,
-    )> = SystemState::from_world(&mut app.world);
+    )> = SystemState::from_world(app.world_mut());
 
     let event_handler = move |event: Event<()>,
                               event_loop: &EventLoopWindowTarget<()>,
@@ -298,7 +298,7 @@ pub fn winit_runner(mut app: App) {
         #[cfg(feature = "trace")]
         let _span = bevy_utils::tracing::info_span!("winit event_handler").entered();
 
-        if let Some(app_exit_events) = app.world.get_resource::<Events<AppExit>>() {
+        if let Some(app_exit_events) = app.world().get_resource::<Events<AppExit>>() {
             if app_exit_event_reader.read(app_exit_events).last().is_some() {
                 *control_flow = ControlFlow::Exit;
                 return;
@@ -307,7 +307,7 @@ pub fn winit_runner(mut app: App) {
 
         match event {
             event::Event::NewEvents(start) => {
-                let (config, window_focused_query) = focused_window_state.get(&app.world);
+                let (config, window_focused_query) = focused_window_state.get(app.world());
 
                 let app_focused = window_focused_query.iter().any(|window| window.focused);
 
@@ -344,7 +344,7 @@ pub fn winit_runner(mut app: App) {
                     InputEvents,
                     CursorEvents,
                     EventWriter<FileDragAndDrop>,
-                )> = SystemState::new(&mut app.world);
+                )> = SystemState::new(app.world_mut());
                 let (
                     mut vulkano_windows,
                     mut window_query,
@@ -352,7 +352,7 @@ pub fn winit_runner(mut app: App) {
                     mut input_events,
                     mut cursor_events,
                     mut file_drag_and_drop_events,
-                ) = system_state.get_mut(&mut app.world);
+                ) = system_state.get_mut(app.world_mut());
 
                 // Entity of this window
                 let window_entity =
@@ -427,8 +427,9 @@ pub fn winit_runner(mut app: App) {
 
                         cursor_events.cursor_moved.send(CursorMoved {
                             window: window_entity,
-                            position: (physical_position / window.resolution.scale_factor())
+                            position: (physical_position / window.resolution.scale_factor() as f64)
                                 .as_vec2(),
+                            delta: None,
                         });
                     }
                     WindowEvent::CursorEntered {
@@ -479,18 +480,20 @@ pub fn winit_runner(mut app: App) {
                         }
                     },
                     WindowEvent::Touch(touch) => {
-                        let location = touch.location.to_logical(window.resolution.scale_factor());
+                        let location = touch.location.to_logical::<f64>(window.resolution.scale_factor() as f64);
 
                         // Event
                         input_events
                             .touch_input
-                            .send(converters::convert_touch_input(touch, location));
+                            //.send(converters::convert_touch_input(touch, location));
+                            .send(todo!());
                     }
                     WindowEvent::ReceivedCharacter(c) => {
-                        input_events.character_input.send(ReceivedCharacter {
-                            window: window_entity,
-                            char: c,
-                        });
+                        todo!();
+                        // input_events.character_input.send(ReceivedCharacter {
+                        //     window: window_entity,
+                        //     char: c,
+                        // });
                     }
                     WindowEvent::ScaleFactorChanged {
                         scale_factor,
@@ -504,7 +507,7 @@ pub fn winit_runner(mut app: App) {
                         );
 
                         let prior_factor = window.resolution.scale_factor();
-                        window.resolution.set_scale_factor(scale_factor);
+                        window.resolution.set_scale_factor(scale_factor as f32);
                         let new_factor = window.resolution.scale_factor();
 
                         if let Some(forced_factor) = window.resolution.scale_factor_override() {
@@ -514,7 +517,7 @@ pub fn winit_runner(mut app: App) {
                             // the new_inner_size should take those into account
                             *new_inner_size =
                                 winit::dpi::LogicalSize::new(window.width(), window.height())
-                                    .to_physical::<u32>(forced_factor);
+                                    .to_physical::<u32>(forced_factor as f64);
                             // TODO: Should this not trigger a WindowsScaleFactorChanged?
                         } else if approx::relative_ne!(new_factor, prior_factor) {
                             // Trigger a change event if they are approximately different
@@ -526,8 +529,8 @@ pub fn winit_runner(mut app: App) {
                             );
                         }
 
-                        let new_logical_width = (new_inner_size.width as f64 / new_factor) as f32;
-                        let new_logical_height = (new_inner_size.height as f64 / new_factor) as f32;
+                        let new_logical_width = new_inner_size.width as f32 / new_factor;
+                        let new_logical_height = new_inner_size.height as f32 / new_factor;
                         if approx::relative_ne!(window.width(), new_logical_width)
                             || approx::relative_ne!(window.height(), new_logical_height)
                         {
@@ -573,7 +576,7 @@ pub fn winit_runner(mut app: App) {
                         window.position.set(position);
 
                         window_events.window_moved.send(WindowMoved {
-                            entity: window_entity,
+                            window: window_entity,
                             position,
                         });
                     }
@@ -585,16 +588,16 @@ pub fn winit_runner(mut app: App) {
                                 cursor,
                             });
                         }
-                        event::Ime::Commit(value) => input_events.ime_input.send(Ime::Commit {
+                        event::Ime::Commit(value) => {input_events.ime_input.send(Ime::Commit {
                             window: window_entity,
                             value,
-                        }),
-                        event::Ime::Enabled => input_events.ime_input.send(Ime::Enabled {
+                        });},
+                        event::Ime::Enabled => {input_events.ime_input.send(Ime::Enabled {
                             window: window_entity,
-                        }),
-                        event::Ime::Disabled => input_events.ime_input.send(Ime::Disabled {
+                        });},
+                        event::Ime::Disabled => {input_events.ime_input.send(Ime::Disabled {
                             window: window_entity,
-                        }),
+                        });},
                     },
                     _ => {}
                 }
@@ -611,8 +614,8 @@ pub fn winit_runner(mut app: App) {
                 ..
             } => {
                 let mut system_state: SystemState<EventWriter<MouseMotion>> =
-                    SystemState::new(&mut app.world);
-                let mut mouse_motion = system_state.get_mut(&mut app.world);
+                    SystemState::new(app.world_mut());
+                let mut mouse_motion = system_state.get_mut(app.world_mut());
 
                 mouse_motion.send(MouseMotion {
                     delta: Vec2::new(x as f32, y as f32),
@@ -632,7 +635,7 @@ pub fn winit_runner(mut app: App) {
                 winit_state.active = true;
             }
             event::Event::MainEventsCleared => {
-                let (winit_config, window_focused_query) = focused_window_state.get(&app.world);
+                let (winit_config, window_focused_query) = focused_window_state.get(app.world());
 
                 let update = if winit_state.active {
                     // True if _any_ windows are currently being focused
@@ -662,7 +665,7 @@ pub fn winit_runner(mut app: App) {
             Event::RedrawEventsCleared => {
                 {
                     // Fetch from world
-                    let (winit_config, window_focused_query) = focused_window_state.get(&app.world);
+                    let (winit_config, window_focused_query) = focused_window_state.get(app.world());
 
                     // True if _any_ windows are currently being focused
                     let app_focused = window_focused_query.iter().any(|window| window.focused);
@@ -690,7 +693,7 @@ pub fn winit_runner(mut app: App) {
                 // we won't be able to see redraw requests until the next event, defeating the
                 // purpose of a redraw request!
                 let mut redraw = false;
-                if let Some(app_redraw_events) = app.world.get_resource::<Events<RequestRedraw>>() {
+                if let Some(app_redraw_events) = app.world().get_resource::<Events<RequestRedraw>>() {
                     if redraw_event_reader.read(app_redraw_events).last().is_some() {
                         *control_flow = ControlFlow::Poll;
                         redraw = true;
@@ -711,7 +714,7 @@ pub fn winit_runner(mut app: App) {
                 vulkano_windows,
                 context,
                 settings,
-            ) = create_window_system_state.get_mut(&mut app.world);
+            ) = create_window_system_state.get_mut(app.world_mut());
 
             // Responsible for creating new windows
             create_window(
@@ -724,7 +727,7 @@ pub fn winit_runner(mut app: App) {
                 settings,
             );
 
-            create_window_system_state.apply(&mut app.world);
+            create_window_system_state.apply(app.world_mut());
         }
     };
 
@@ -734,6 +737,8 @@ pub fn winit_runner(mut app: App) {
     } else {
         run(event_loop, event_handler);
     }
+
+    AppExit::Success
 }
 
 #[cfg(feature = "gui")]

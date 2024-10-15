@@ -6,7 +6,7 @@ use bevy::{
         RemovedComponents, Res, Resource, Window,
     },
     utils::HashMap,
-    window::{RawHandleWrapper, WindowClosed, WindowCreated},
+    window::{RawHandleWrapper, WindowClosed, WindowCreated, WindowWrapper},
 };
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::{
@@ -48,13 +48,15 @@ pub(crate) fn create_window<'a>(
             vulkano_windows.create_window(event_loop, entity, &window, &context.context, &settings);
         window
             .resolution
-            .set_scale_factor(vulkano_window.window().scale_factor());
+            .set_scale_factor(vulkano_window.window().scale_factor() as f32);
         commands
             .entity(entity)
-            .insert(RawHandleWrapper {
-                window_handle: vulkano_window.window().raw_window_handle(),
-                display_handle: vulkano_window.window().raw_display_handle(),
-            })
+            // .insert(RawHandleWrapper {
+            //     window_handle: vulkano_window.window().raw_window_handle(),
+            //     display_handle: vulkano_window.window().raw_display_handle(),
+            // })
+            //.insert(RawHandleWrapper::new(&WindowWrapper::new(vulkano_window.window().raw_window_handle())).unwrap())
+            .insert(todo!("I couldn't fix the above..."))
             .insert(CachedWindow {
                 window: window.clone(),
             });

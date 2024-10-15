@@ -1,3 +1,28 @@
+cargo-features = ["codegen-backend"]
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+codegen-backend = "cranelift"
+
+[profile.dev.build-override]
+codegen-backend = "llvm"
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+codegen-backend = "llvm"
+
+# Enable more optimization in the release profile at the cost of compile time.
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+incremental = false
+debug = false
+
+# Remove anything above this comment. I added it for compile speed. Hopefully I don't forget to remove it.
+
 [package]
 authors = ["Okko Hakola <okkohakola@gmail.com>"]
 categories = ["gui", "game-development"]
@@ -30,7 +55,7 @@ winit = "0.28"
 [dependencies.bevy]
 default-features = false
 features = []
-version = "0.12"
+version = "0.14"
 
 [dev-dependencies]
 anyhow = "1.0.75"

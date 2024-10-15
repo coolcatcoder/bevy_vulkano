@@ -10,7 +10,7 @@ use bevy::{
     app::PluginGroupBuilder,
     prelude::*,
     time::common_conditions::on_timer,
-    window::{close_on_esc, WindowMode},
+    window::{WindowMode},
 };
 use bevy_vulkano::{BevyVulkanoContext, BevyVulkanoWindows, VulkanoWinitPlugin};
 
@@ -50,7 +50,7 @@ fn main() {
             ..default()
         }))
         .add_systems(Startup, create_pipelines)
-        .add_systems(Update, close_on_esc)
+        //.add_systems(Update, close_on_esc)
         .add_systems(Update, draw_life_system)
         .add_systems(Update, update_window_title_system)
         .add_systems(
@@ -97,7 +97,7 @@ fn create_pipelines(
 fn draw_life_system(
     mut game_of_life: ResMut<GameOfLifeComputePipeline>,
     window: Query<&Window>,
-    mouse_input: Res<Input<MouseButton>>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
 ) {
     if mouse_input.pressed(MouseButton::Left) {
         let primary = window.get_single().unwrap();
