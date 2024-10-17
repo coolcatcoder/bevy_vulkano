@@ -11,35 +11,32 @@ mod config;
 mod converters;
 mod system;
 mod vulkano_windows;
+pub mod winit_event;
+pub mod state;
+pub mod accessibility;
 
+use accessibility::{AccessKitAdapters, WinitActionRequestHandlers};
 use bevy::{
-    app::{App, AppExit, Plugin},
-    ecs::{
+    a11y::AccessibilityRequested, app::{App, AppExit, Plugin}, ecs::{
         event::{Events, ManualEventReader},
         system::{SystemParam, SystemState},
-    },
-    input::{
+    }, input::{
         keyboard::KeyboardInput,
         mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel},
         touch::TouchInput,
-    },
-    math::{ivec2, DVec2, Vec2},
-    prelude::*,
-    utils::Instant,
-    window::{
-        exit_on_all_closed, CursorEntered, CursorLeft, CursorMoved, FileDragAndDrop,
-        ReceivedCharacter, RequestRedraw, WindowBackendScaleFactorChanged, WindowCloseRequested,
-        WindowCreated, WindowFocused, WindowMoved, WindowResized, WindowScaleFactorChanged,
-    },
+    }, math::{ivec2, DVec2, Vec2}, prelude::*, utils::Instant, window::{
+        exit_on_all_closed, CursorEntered, CursorLeft, CursorMoved, FileDragAndDrop, RawHandleWrapperHolder, ReceivedCharacter, RequestRedraw, WindowBackendScaleFactorChanged, WindowCloseRequested, WindowCreated, WindowFocused, WindowMoved, WindowResized, WindowScaleFactorChanged
+    }
 };
 pub use config::*;
 #[cfg(feature = "gui")]
 pub use egui_winit_vulkano;
+use state::winit_runner;
 use vulkano_util::context::{VulkanoConfig, VulkanoContext};
 pub use vulkano_windows::*;
 
 /// Wrapper around [`VulkanoContext`] to allow using them as resources
-#[derive(Resource)]
+#[derive(Resource, Deref, DerefMut)]
 pub struct BevyVulkanoContext {
     pub context: VulkanoContext,
 }
@@ -48,10 +45,11 @@ pub struct BevyVulkanoContext {
 pub use winit::platform::android::activity::AndroidApp;
 use winit::{
     event::{self, DeviceEvent, Event, StartCause, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget},
+    event_loop::{ControlFlow, EventLoop, EventLoopBuilder, ActiveEventLoop},
 };
+use winit_event::WinitEvent;
 
-use crate::system::{changed_window, create_window, despawn_window, CachedWindow};
+use crate::system::{changed_windows, create_windows, despawn_windows, CachedWindow};
 
 #[cfg(target_os = "android")]
 pub static ANDROID_APP: once_cell::sync::OnceCell<AndroidApp> = once_cell::sync::OnceCell::new();
@@ -60,690 +58,169 @@ pub static ANDROID_APP: once_cell::sync::OnceCell<AndroidApp> = once_cell::sync:
 /// In addition, windows include custom render functionality with Vulkano.
 /// This is intended to replace `bevy_winit`.
 #[derive(Default)]
-pub struct VulkanoWinitPlugin;
+pub struct VulkanoWinitPlugin {
+    pub run_on_any_thread: bool,
+}
 
 impl Plugin for VulkanoWinitPlugin {
+    fn name(&self) -> &str {
+        "bevy_vulkano::VulkanoWinitPlugin"
+    }
+
     fn build(&self, app: &mut App) {
-        let mut event_loop_builder = EventLoopBuilder::<()>::with_user_event();
+        let mut event_loop_builder = EventLoop::<()>::with_user_event();
+
+        // linux check is needed because x11 might be enabled on other platforms.
+        #[cfg(all(target_os = "linux", feature = "x11"))]
+        {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+
+            // This allows a Bevy app to be started and ran outside the main thread.
+            // A use case for this is to allow external applications to spawn a thread
+            // which runs a Bevy app without requiring the Bevy app to need to reside on
+            // the main thread, which can be problematic.
+            event_loop_builder.with_any_thread(self.run_on_any_thread);
+        }
+
+        // linux check is needed because wayland might be enabled on other platforms.
+        #[cfg(all(target_os = "linux", feature = "wayland"))]
+        {
+            use winit::platform::wayland::EventLoopBuilderExtWayland;
+            event_loop_builder.with_any_thread(self.run_on_any_thread);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::EventLoopBuilderExtWindows;
+            event_loop_builder.with_any_thread(self.run_on_any_thread);
+        }
 
         #[cfg(target_os = "android")]
         {
             use winit::platform::android::EventLoopBuilderExtAndroid;
-            event_loop_builder.with_android_app(
-                ANDROID_APP
-                    .get()
-                    .expect("Bevy must be setup with the #[bevy_main] macro on Android")
-                    .clone(),
-            );
+            let msg = "Bevy must be setup with the #[bevy_main] macro on Android";
+            event_loop_builder.with_android_app(ANDROID_APP.get().expect(msg).clone());
         }
 
-        let event_loop = event_loop_builder.build();
-        app.insert_non_send_resource(event_loop);
-
         // Retrieve config, or use default.
-        let config = if app
-            .world()
-            .get_non_send_resource::<BevyVulkanoSettings>()
-            .is_none()
-        {
-            BevyVulkanoSettings::default()
-        } else {
-            app.world_mut()
-                .remove_non_send_resource::<BevyVulkanoSettings>()
-                .unwrap()
-        };
+        let config = app.world_mut().remove_non_send_resource::<VulkanoConfig>().unwrap_or_default();
 
         // Create vulkano context using the vulkano config from settings
-        let BevyVulkanoSettings {
-            vulkano_config, ..
-        } = config;
         let vulkano_context = BevyVulkanoContext {
-            context: VulkanoContext::new(vulkano_config),
-        };
-        // Place config back as resource..
-        let new_config = BevyVulkanoSettings {
-            vulkano_config: VulkanoConfig::default(),
-            ..config
+            context: VulkanoContext::new(config),
         };
 
         app.init_non_send_resource::<BevyVulkanoWindows>()
             .insert_resource(vulkano_context)
-            .insert_non_send_resource(new_config)
+            .init_resource::<WinitSettings>()
+            .add_event::<WinitEvent>()
             .set_runner(winit_runner)
             // exit_on_all_closed only uses the query to determine if the query is empty,
             // and so doesn't care about ordering relative to changed_window
             .add_systems(
                 Last,
                 (
-                    changed_window.ambiguous_with(exit_on_all_closed),
+                    changed_windows.ambiguous_with(exit_on_all_closed),
                     // Update the state of the window before attempting to despawn to ensure consistent event ordering
-                    despawn_window.after(changed_window),
+                    despawn_windows.after(changed_windows),
                 ),
             );
 
-        #[cfg(feature = "gui")]
-        {
-            app.add_systems(PreUpdate, begin_egui_frame_system);
-        }
+        let event_loop = event_loop_builder
+        .build()
+        .expect("Failed to build event loop");
 
-        let mut create_window_system_state: SystemState<(
-            Commands,
-            NonSendMut<EventLoop<()>>,
-            Query<(Entity, &mut Window)>,
-            EventWriter<WindowCreated>,
-            NonSendMut<BevyVulkanoWindows>,
-            Res<BevyVulkanoContext>,
-            NonSend<BevyVulkanoSettings>,
-        )> = SystemState::from_world(app.world_mut());
+        // `winit`'s windows are bound to the event loop that created them, so the event loop must
+        // be inserted as a resource here to pass it onto the runner.
+        app.insert_non_send_resource(event_loop);
 
-        // And for ios and macos, we should not create window early, all ui related code should be executed inside
-        // UIApplicationMain/NSApplicationMain.
-        #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
-        {
-            let (
-                commands,
-                event_loop,
-                mut new_windows,
-                event_writer,
-                vulkano_windows,
-                context,
-                settings,
-            ) = create_window_system_state.get_mut(app.world_mut());
+        // TODO: Old stuff I think. Keeping it commented out, cause I don't really know what I'm doing.
+        // #[cfg(feature = "gui")]
+        // {
+        //     app.add_systems(PreUpdate, begin_egui_frame_system);
+        // }
 
-            // Here we need to create a winit-window and give it a WindowHandle which the renderer can use.
-            // It needs to be spawned before the start of the startup schedule, so we cannot use a regular system.
-            // Instead we need to create the window and spawn it using direct world access
-            create_window(
-                commands,
-                &event_loop,
-                new_windows.iter_mut(),
-                event_writer,
-                vulkano_windows,
-                context,
-                settings,
-            );
-        }
+        // let mut create_window_system_state: SystemState<(
+        //     Commands,
+        //     NonSendMut<EventLoop<()>>,
+        //     Query<(Entity, &mut Window)>,
+        //     EventWriter<WindowCreated>,
+        //     NonSendMut<BevyVulkanoWindows>,
+        //     Res<BevyVulkanoContext>,
+        //     NonSend<BevyVulkanoSettings>,
+        // )> = SystemState::from_world(&mut app.world);
 
-        create_window_system_state.apply(app.world_mut());
+        // // And for ios and macos, we should not create window early, all ui related code should be executed inside
+        // // UIApplicationMain/NSApplicationMain.
+        // #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
+        // {
+        //     let (
+        //         commands,
+        //         event_loop,
+        //         mut new_windows,
+        //         event_writer,
+        //         vulkano_windows,
+        //         context,
+        //         settings,
+        //     ) = create_window_system_state.get_mut(&mut app.world);
+
+        //     // Here we need to create a winit-window and give it a WindowHandle which the renderer can use.
+        //     // It needs to be spawned before the start of the startup schedule, so we cannot use a regular system.
+        //     // Instead we need to create the window and spawn it using direct world access
+        //     create_window(
+        //         commands,
+        //         &event_loop,
+        //         new_windows.iter_mut(),
+        //         event_writer,
+        //         vulkano_windows,
+        //         context,
+        //         settings,
+        //     );
+        // }
+
+        // create_window_system_state.apply(&mut app.world);
     }
 }
 
-fn run<F>(event_loop: EventLoop<()>, event_handler: F) -> !
-where
-    F: 'static + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow),
-{
-    event_loop.run(event_handler)
+/// The default event that can be used to wake the window loop
+/// Wakes up the loop if in wait state
+#[derive(Debug, Default, Clone, Copy, Event)]
+pub struct WakeUp;
+
+/// The [`winit::event_loop::EventLoopProxy`].
+///
+/// The `EventLoopProxy` can be used to request a redraw from outside bevy.
+///
+/// Use `NonSend<EventLoopProxy>` to receive this resource.
+pub type EventLoopProxy = winit::event_loop::EventLoopProxy<()>;
+
+trait AppSendEvent {
+    fn send(&mut self, event: impl Into<WinitEvent>);
 }
 
-#[cfg(any(
-    target_os = "windows",
-    target_os = "macos",
-    target_os = "linux",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd"
-))]
-fn run_return<F>(event_loop: &mut EventLoop<()>, event_handler: F)
-where
-    F: FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow),
-{
-    use winit::platform::run_return::EventLoopExtRunReturn;
-    event_loop.run_return(event_handler);
-}
-
-#[cfg(not(any(
-    target_os = "windows",
-    target_os = "macos",
-    target_os = "linux",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd"
-)))]
-fn run_return<F>(_event_loop: &mut EventLoop<()>, _event_handler: F)
-where
-    F: FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow),
-{
-    panic!("Run return is not supported on this platform!")
-}
-
-#[derive(SystemParam)]
-struct WindowEvents<'w> {
-    window_resized: EventWriter<'w, WindowResized>,
-    window_close_requested: EventWriter<'w, WindowCloseRequested>,
-    window_scale_factor_changed: EventWriter<'w, WindowScaleFactorChanged>,
-    window_backend_scale_factor_changed: EventWriter<'w, WindowBackendScaleFactorChanged>,
-    window_focused: EventWriter<'w, WindowFocused>,
-    window_moved: EventWriter<'w, WindowMoved>,
-}
-
-#[derive(SystemParam)]
-struct InputEvents<'w> {
-    keyboard_input: EventWriter<'w, KeyboardInput>,
-    character_input: EventWriter<'w, ReceivedCharacter>,
-    mouse_button_input: EventWriter<'w, MouseButtonInput>,
-    mouse_wheel_input: EventWriter<'w, MouseWheel>,
-    touch_input: EventWriter<'w, TouchInput>,
-    ime_input: EventWriter<'w, Ime>,
-}
-
-#[derive(SystemParam)]
-struct CursorEvents<'w> {
-    cursor_moved: EventWriter<'w, CursorMoved>,
-    cursor_entered: EventWriter<'w, CursorEntered>,
-    cursor_left: EventWriter<'w, CursorLeft>,
-}
-
-/// Stores state that must persist between frames.
-struct WinitPersistentState {
-    /// Tracks whether or not the application is active or suspended.
-    active: bool,
-    /// Tracks whether or not an event has occurred this frame that would trigger an update in low
-    /// power mode. Should be reset at the end of every frame.
-    low_power_event: bool,
-    /// Tracks whether the event loop was started this frame because of a redraw request.
-    redraw_request_sent: bool,
-    /// Tracks if the event loop was started this frame because of a `WaitUntil` timeout.
-    timeout_reached: bool,
-    last_update: Instant,
-}
-
-impl Default for WinitPersistentState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            low_power_event: false,
-            redraw_request_sent: false,
-            timeout_reached: false,
-            last_update: Instant::now(),
-        }
+impl AppSendEvent for Vec<WinitEvent> {
+    fn send(&mut self, event: impl Into<WinitEvent>) {
+        self.push(Into::<WinitEvent>::into(event));
     }
 }
 
-pub fn winit_runner(mut app: App) -> AppExit {
-    let mut event_loop = app
-        .world_mut()
-        .remove_non_send_resource::<EventLoop<()>>()
-        .unwrap();
-
-    let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
-    let mut redraw_event_reader = ManualEventReader::<RequestRedraw>::default();
-    let mut winit_state = WinitPersistentState::default();
-    app.world_mut()
-        .insert_non_send_resource(event_loop.create_proxy());
-
-    let return_from_run = app
-        .world()
-        .non_send_resource::<BevyVulkanoSettings>()
-        .return_from_run;
-
-    trace!("Entering winit event loop");
-
-    let mut focused_window_state: SystemState<(NonSend<BevyVulkanoSettings>, Query<&Window>)> =
-        SystemState::from_world(app.world_mut());
-
-    let mut create_window_system_state: SystemState<(
-        Commands,
-        Query<(Entity, &mut Window), Added<Window>>,
-        EventWriter<WindowCreated>,
-        NonSendMut<BevyVulkanoWindows>,
-        Res<BevyVulkanoContext>,
-        NonSend<BevyVulkanoSettings>,
-    )> = SystemState::from_world(app.world_mut());
-
-    let event_handler = move |event: Event<()>,
-                              event_loop: &EventLoopWindowTarget<()>,
-                              control_flow: &mut ControlFlow| {
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("winit event_handler").entered();
-
-        if let Some(app_exit_events) = app.world().get_resource::<Events<AppExit>>() {
-            if app_exit_event_reader.read(app_exit_events).last().is_some() {
-                *control_flow = ControlFlow::Exit;
-                return;
-            }
-        }
-
-        match event {
-            event::Event::NewEvents(start) => {
-                let (config, window_focused_query) = focused_window_state.get(app.world());
-
-                let app_focused = window_focused_query.iter().any(|window| window.focused);
-
-                // Check if either the `WaitUntil` timeout was triggered by winit, or that same
-                // amount of time has elapsed since the last app update. This manual check is needed
-                // because we don't know if the criteria for an app update were met until the end of
-                // the frame.
-                let auto_timeout_reached = matches!(start, StartCause::ResumeTimeReached { .. });
-                let now = Instant::now();
-                let manual_timeout_reached = match config.update_mode(app_focused) {
-                    UpdateMode::Continuous => false,
-                    UpdateMode::Reactive {
-                        max_wait,
-                    }
-                    | UpdateMode::ReactiveLowPower {
-                        max_wait,
-                    } => now.duration_since(winit_state.last_update) >= *max_wait,
-                };
-                // The low_power_event state and timeout must be reset at the start of every frame.
-                winit_state.low_power_event = false;
-                winit_state.timeout_reached = auto_timeout_reached || manual_timeout_reached;
-            }
-            #[allow(unused_mut)]
-            event::Event::WindowEvent {
-                event,
-                window_id: winit_window_id,
-                ..
-            } => {
-                // Fetch and prepare details from the world
-                let mut system_state: SystemState<(
-                    NonSendMut<BevyVulkanoWindows>,
-                    Query<(&mut Window, &mut CachedWindow)>,
-                    WindowEvents,
-                    InputEvents,
-                    CursorEvents,
-                    EventWriter<FileDragAndDrop>,
-                )> = SystemState::new(app.world_mut());
-                let (
-                    mut vulkano_windows,
-                    mut window_query,
-                    mut window_events,
-                    mut input_events,
-                    mut cursor_events,
-                    mut file_drag_and_drop_events,
-                ) = system_state.get_mut(app.world_mut());
-
-                // Entity of this window
-                let window_entity =
-                    if let Some(entity) = vulkano_windows.get_window_entity(winit_window_id) {
-                        entity
-                    } else {
-                        warn!(
-                            "Skipped event {:?} for unknown winit Window Id {:?}",
-                            event, winit_window_id
-                        );
-                        return;
-                    };
-
-                let (mut window, mut cache) =
-                    if let Ok((window, info)) = window_query.get_mut(window_entity) {
-                        (window, info)
-                    } else {
-                        warn!(
-                            "Window {:?} is missing `Window` component, skipping event {:?}",
-                            window_entity, event
-                        );
-                        return;
-                    };
-
-                // Skip event if egui wants it
-                #[cfg(feature = "gui")]
-                {
-                    if let Some(vulkano_window) =
-                        vulkano_windows.get_vulkano_window_mut(window_entity)
-                    {
-                        // Update egui with the window event. If false, we should skip the event in bevy
-                        if vulkano_window.gui.update(&event) {
-                            return;
-                        }
-                    }
-                }
-
-                winit_state.low_power_event = true;
-
-                match event {
-                    WindowEvent::Resized(size) => {
-                        window
-                            .resolution
-                            .set_physical_resolution(size.width, size.height);
-
-                        window_events.window_resized.send(WindowResized {
-                            window: window_entity,
-                            width: window.width(),
-                            height: window.height(),
-                        });
-                    }
-                    WindowEvent::CloseRequested => {
-                        window_events
-                            .window_close_requested
-                            .send(WindowCloseRequested {
-                                window: window_entity,
-                            });
-                    }
-                    WindowEvent::KeyboardInput {
-                        ref input, ..
-                    } => {
-                        input_events
-                            .keyboard_input
-                            .send(converters::convert_keyboard_input(input, window_entity));
-                    }
-                    WindowEvent::CursorMoved {
-                        position, ..
-                    } => {
-                        let physical_position = DVec2::new(position.x, position.y);
-
-                        window.set_physical_cursor_position(Some(physical_position));
-
-                        cursor_events.cursor_moved.send(CursorMoved {
-                            window: window_entity,
-                            position: (physical_position / window.resolution.scale_factor() as f64)
-                                .as_vec2(),
-                            delta: None,
-                        });
-                    }
-                    WindowEvent::CursorEntered {
-                        ..
-                    } => {
-                        cursor_events.cursor_entered.send(CursorEntered {
-                            window: window_entity,
-                        });
-                    }
-                    WindowEvent::CursorLeft {
-                        ..
-                    } => {
-                        window.set_physical_cursor_position(None);
-
-                        cursor_events.cursor_left.send(CursorLeft {
-                            window: window_entity,
-                        });
-                    }
-                    WindowEvent::MouseInput {
-                        state,
-                        button,
-                        ..
-                    } => {
-                        input_events.mouse_button_input.send(MouseButtonInput {
-                            button: converters::convert_mouse_button(button),
-                            state: converters::convert_element_state(state),
-                            window: window_entity,
-                        });
-                    }
-                    WindowEvent::MouseWheel {
-                        delta, ..
-                    } => match delta {
-                        event::MouseScrollDelta::LineDelta(x, y) => {
-                            input_events.mouse_wheel_input.send(MouseWheel {
-                                unit: MouseScrollUnit::Line,
-                                x,
-                                y,
-                                window: window_entity,
-                            });
-                        }
-                        event::MouseScrollDelta::PixelDelta(p) => {
-                            input_events.mouse_wheel_input.send(MouseWheel {
-                                unit: MouseScrollUnit::Pixel,
-                                x: p.x as f32,
-                                y: p.y as f32,
-                                window: window_entity,
-                            });
-                        }
-                    },
-                    WindowEvent::Touch(touch) => {
-                        let location = touch.location.to_logical::<f64>(window.resolution.scale_factor() as f64);
-
-                        // Event
-                        input_events
-                            .touch_input
-                            //.send(converters::convert_touch_input(touch, location));
-                            .send(todo!());
-                    }
-                    WindowEvent::ReceivedCharacter(c) => {
-                        todo!();
-                        // input_events.character_input.send(ReceivedCharacter {
-                        //     window: window_entity,
-                        //     char: c,
-                        // });
-                    }
-                    WindowEvent::ScaleFactorChanged {
-                        scale_factor,
-                        new_inner_size,
-                    } => {
-                        window_events.window_backend_scale_factor_changed.send(
-                            WindowBackendScaleFactorChanged {
-                                window: window_entity,
-                                scale_factor,
-                            },
-                        );
-
-                        let prior_factor = window.resolution.scale_factor();
-                        window.resolution.set_scale_factor(scale_factor as f32);
-                        let new_factor = window.resolution.scale_factor();
-
-                        if let Some(forced_factor) = window.resolution.scale_factor_override() {
-                            // If there is a scale factor override, then force that to be used
-                            // Otherwise, use the OS suggested size
-                            // We have already told the OS about our resize constraints, so
-                            // the new_inner_size should take those into account
-                            *new_inner_size =
-                                winit::dpi::LogicalSize::new(window.width(), window.height())
-                                    .to_physical::<u32>(forced_factor as f64);
-                            // TODO: Should this not trigger a WindowsScaleFactorChanged?
-                        } else if approx::relative_ne!(new_factor, prior_factor) {
-                            // Trigger a change event if they are approximately different
-                            window_events.window_scale_factor_changed.send(
-                                WindowScaleFactorChanged {
-                                    window: window_entity,
-                                    scale_factor,
-                                },
-                            );
-                        }
-
-                        let new_logical_width = new_inner_size.width as f32 / new_factor;
-                        let new_logical_height = new_inner_size.height as f32 / new_factor;
-                        if approx::relative_ne!(window.width(), new_logical_width)
-                            || approx::relative_ne!(window.height(), new_logical_height)
-                        {
-                            window_events.window_resized.send(WindowResized {
-                                window: window_entity,
-                                width: new_logical_width,
-                                height: new_logical_height,
-                            });
-                        }
-                        window
-                            .resolution
-                            .set_physical_resolution(new_inner_size.width, new_inner_size.height);
-                    }
-                    WindowEvent::Focused(focused) => {
-                        // Component
-                        window.focused = focused;
-
-                        window_events.window_focused.send(WindowFocused {
-                            window: window_entity,
-                            focused,
-                        });
-                    }
-                    WindowEvent::DroppedFile(path_buf) => {
-                        file_drag_and_drop_events.send(FileDragAndDrop::DroppedFile {
-                            window: window_entity,
-                            path_buf,
-                        });
-                    }
-                    WindowEvent::HoveredFile(path_buf) => {
-                        file_drag_and_drop_events.send(FileDragAndDrop::HoveredFile {
-                            window: window_entity,
-                            path_buf,
-                        });
-                    }
-                    WindowEvent::HoveredFileCancelled => {
-                        file_drag_and_drop_events.send(FileDragAndDrop::HoveredFileCanceled {
-                            window: window_entity,
-                        });
-                    }
-                    WindowEvent::Moved(position) => {
-                        let position = ivec2(position.x, position.y);
-
-                        window.position.set(position);
-
-                        window_events.window_moved.send(WindowMoved {
-                            window: window_entity,
-                            position,
-                        });
-                    }
-                    WindowEvent::Ime(event) => match event {
-                        event::Ime::Preedit(value, cursor) => {
-                            input_events.ime_input.send(Ime::Preedit {
-                                window: window_entity,
-                                value,
-                                cursor,
-                            });
-                        }
-                        event::Ime::Commit(value) => {input_events.ime_input.send(Ime::Commit {
-                            window: window_entity,
-                            value,
-                        });},
-                        event::Ime::Enabled => {input_events.ime_input.send(Ime::Enabled {
-                            window: window_entity,
-                        });},
-                        event::Ime::Disabled => {input_events.ime_input.send(Ime::Disabled {
-                            window: window_entity,
-                        });},
-                    },
-                    _ => {}
-                }
-
-                if window.is_changed() {
-                    cache.window = window.clone();
-                }
-            }
-            event::Event::DeviceEvent {
-                event:
-                    DeviceEvent::MouseMotion {
-                        delta: (x, y),
-                    },
-                ..
-            } => {
-                let mut system_state: SystemState<EventWriter<MouseMotion>> =
-                    SystemState::new(app.world_mut());
-                let mut mouse_motion = system_state.get_mut(app.world_mut());
-
-                mouse_motion.send(MouseMotion {
-                    delta: Vec2::new(x as f32, y as f32),
-                });
-            }
-            event::Event::Suspended => {
-                winit_state.active = false;
-                #[cfg(target_os = "android")]
-                {
-                    // Bevy doesn't support suspend/resume so we just exit
-                    // and Android will restart the application on resume
-                    // TODO: Save save some state and load on resume
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            event::Event::Resumed => {
-                winit_state.active = true;
-            }
-            event::Event::MainEventsCleared => {
-                let (winit_config, window_focused_query) = focused_window_state.get(app.world());
-
-                let update = if winit_state.active {
-                    // True if _any_ windows are currently being focused
-                    let app_focused = window_focused_query.iter().any(|window| window.focused);
-                    match winit_config.update_mode(app_focused) {
-                        UpdateMode::Continuous
-                        | UpdateMode::Reactive {
-                            ..
-                        } => true,
-                        UpdateMode::ReactiveLowPower {
-                            ..
-                        } => {
-                            winit_state.low_power_event
-                                || winit_state.redraw_request_sent
-                                || winit_state.timeout_reached
-                        }
-                    }
-                } else {
-                    false
-                };
-
-                if update {
-                    winit_state.last_update = Instant::now();
-                    app.update();
-                }
-            }
-            Event::RedrawEventsCleared => {
-                {
-                    // Fetch from world
-                    let (winit_config, window_focused_query) = focused_window_state.get(app.world());
-
-                    // True if _any_ windows are currently being focused
-                    let app_focused = window_focused_query.iter().any(|window| window.focused);
-
-                    let now = Instant::now();
-                    use UpdateMode::*;
-                    *control_flow = match winit_config.update_mode(app_focused) {
-                        Continuous => ControlFlow::Poll,
-                        Reactive {
-                            max_wait,
-                        }
-                        | ReactiveLowPower {
-                            max_wait,
-                        } => {
-                            if let Some(instant) = now.checked_add(*max_wait) {
-                                ControlFlow::WaitUntil(instant)
-                            } else {
-                                ControlFlow::Wait
-                            }
-                        }
-                    };
-                }
-
-                // This block needs to run after `app.update()` in `MainEventsCleared`. Otherwise,
-                // we won't be able to see redraw requests until the next event, defeating the
-                // purpose of a redraw request!
-                let mut redraw = false;
-                if let Some(app_redraw_events) = app.world().get_resource::<Events<RequestRedraw>>() {
-                    if redraw_event_reader.read(app_redraw_events).last().is_some() {
-                        *control_flow = ControlFlow::Poll;
-                        redraw = true;
-                    }
-                }
-
-                winit_state.redraw_request_sent = redraw;
-            }
-
-            _ => (),
-        }
-
-        if winit_state.active {
-            let (
-                commands,
-                mut new_windows,
-                created_window_writer,
-                vulkano_windows,
-                context,
-                settings,
-            ) = create_window_system_state.get_mut(app.world_mut());
-
-            // Responsible for creating new windows
-            create_window(
-                commands,
-                event_loop,
-                new_windows.iter_mut(),
-                created_window_writer,
-                vulkano_windows,
-                context,
-                settings,
-            );
-
-            create_window_system_state.apply(app.world_mut());
-        }
-    };
-
-    // If true, returns control from Winit back to the main Bevy loop
-    if return_from_run {
-        run_return(&mut event_loop, event_handler);
-    } else {
-        run(event_loop, event_handler);
-    }
-
-    AppExit::Success
-}
-
-#[cfg(feature = "gui")]
-pub fn begin_egui_frame_system(mut vulkano_windows: NonSendMut<BevyVulkanoWindows>) {
-    for (_, w) in vulkano_windows.windows.iter_mut() {
-        w.gui.begin_frame();
-    }
-}
+/// The parameters of the [`create_windows`] system.
+pub type CreateWindowParams<'w, 's, F = ()> = (
+    Commands<'w, 's>,
+    Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut Window,
+            Option<&'static RawHandleWrapperHolder>,
+        ),
+        F,
+    >,
+    EventWriter<'w, WindowCreated>,
+    NonSendMut<'w, BevyVulkanoWindows>,
+    Res<'w, BevyVulkanoContext>,
+    NonSendMut<'w, AccessKitAdapters>,
+    ResMut<'w, WinitActionRequestHandlers>,
+    Res<'w, AccessibilityRequested>,
+);
