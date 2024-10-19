@@ -1,7 +1,7 @@
 use bevy::{
     ecs::{entity::EntityHashMap, system::SystemParam},
     prelude::*,
-    window::{PresentMode, WindowClosing, WindowCreated},
+    window::{PresentMode, WindowClosing, WindowCreated, WindowResized},
     winit::WinitWindows,
 };
 
@@ -35,12 +35,7 @@ pub fn create_renderer(
     for window_created in windows_created.read() {
         let window_entity = window_created.window;
 
-        if renderers.renderers.contains_key(&window_entity) {
-            error!(
-                "We were told that a window was created, but that window already exists according \
-                 to vulkano... What have you done?"
-            );
-        } else {
+        if !renderers.renderers.contains_key(&window_entity) {
             let Some(window) = renderers.windows.get_window(window_created.window) else {
                 error!("This shouldn't happen! Somehow a window both exists and doesn't exist!");
                 continue;
@@ -80,6 +75,20 @@ pub fn update_present_mode(
 
         // Only triggers a swapchain recreation if it was actually changed, don't worry!
         renderer.set_present_mode(bevy_to_vulkano_present_mode(window.present_mode));
+    }
+}
+
+pub fn resize(
+    mut renderers: VulkanoRenderers,
+    mut resized_windows: EventReader<WindowResized>,
+) {
+    for resized_window in resized_windows.read() {
+        let Some(mut renderer) = renderers.get_renderer(resized_window.window) else {
+            error!("A window was found without a renderer!");
+            continue;
+        };
+
+        renderer.resize();
     }
 }
 
