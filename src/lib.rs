@@ -19,6 +19,8 @@ impl Plugin for VulkanoPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BevyVulkanoContext>()
         .init_non_send_resource::<EntityHashMap<VulkanoWindowRendererWithoutWindow>>()
+        // Systems in startup can access a renderer immediately with this, I hope.
+        .add_systems(PreStartup, create_renderer)
         .add_systems(PostUpdate, (create_renderer, update_present_mode.after(create_renderer), destroy_renderer));
     }
 }
