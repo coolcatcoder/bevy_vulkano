@@ -64,7 +64,7 @@ winit = { version = "0.30", default-features = true, features = [
 
 [dependencies.bevy]
 default-features = false
-features = []
+features = ["bevy_winit"]
 version = "0.14"
 
 [dev-dependencies]
