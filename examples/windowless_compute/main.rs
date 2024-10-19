@@ -1,12 +1,14 @@
-use bevy::{app::AppExit, prelude::*};
-use bevy_vulkano::{BevyVulkanoContext, VulkanoWinitPlugin};
+use std::sync::Arc;
+
+use bevy::{app::AppExit, prelude::*, winit::WakeUp};
+use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin};
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        allocator::StandardCommandBufferAllocator, RecordingCommandBuffer, CommandBufferUsage,
     },
     descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
     pipeline::{
@@ -29,7 +31,9 @@ fn main() {
                 primary_window: None,
                 ..default()
             },
-            VulkanoWinitPlugin,
+            bevy::a11y::AccessibilityPlugin,
+            bevy::winit::WinitPlugin::<WakeUp>::default(),
+            VulkanoPlugin,
         ))
         .add_systems(Startup, run_compute_shader_once_then_exit)
         .run();
@@ -61,21 +65,21 @@ fn run_compute_shader_once_then_exit(
                 "
             }
         }
-        let cs = cs::load(context.context.device().clone())
+        let cs = cs::load(context.device().clone())
             .unwrap()
             .entry_point("main")
             .unwrap();
         let stage = PipelineShaderStageCreateInfo::new(cs);
         let layout = PipelineLayout::new(
-            context.context.device().clone(),
+            context.device().clone(),
             PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
-                .into_pipeline_layout_create_info(context.context.device().clone())
+                .into_pipeline_layout_create_info(context.device().clone())
                 .unwrap(),
         )
         .unwrap();
 
         ComputePipeline::new(
-            context.context.device().clone(),
+            context.device().clone(),
             None,
             ComputePipelineCreateInfo::stage_layout(stage, layout),
         )
@@ -84,7 +88,7 @@ fn run_compute_shader_once_then_exit(
 
     // Create buffer
     let data_buffer = Buffer::from_iter(
-        context.context.memory_allocator().clone(),
+        context.memory_allocator().clone(),
         BufferCreateInfo {
             usage: BufferUsage::STORAGE_BUFFER,
             ..Default::default()
@@ -99,15 +103,15 @@ fn run_compute_shader_once_then_exit(
     .unwrap();
 
     let command_buffer_allocator =
-        StandardCommandBufferAllocator::new(context.context.device().clone(), Default::default());
+        Arc::new(StandardCommandBufferAllocator::new(context.device().clone(), Default::default()));
 
     let descriptor_set_allocator =
-        StandardDescriptorSetAllocator::new(context.context.device().clone(), Default::default());
+        Arc::new(StandardDescriptorSetAllocator::new(context.device().clone(), Default::default()));
 
     // Create pipeline layout & descriptor set (data inputs)
     let layout = pipeline.layout().set_layouts().first().unwrap();
-    let set = PersistentDescriptorSet::new(
-        &descriptor_set_allocator,
+    let set = DescriptorSet::new(
+        descriptor_set_allocator.clone(),
         layout.clone(),
         [WriteDescriptorSet::buffer(0, data_buffer.clone())],
         [],
@@ -115,9 +119,9 @@ fn run_compute_shader_once_then_exit(
     .unwrap();
 
     // Build command buffer
-    let mut builder = AutoCommandBufferBuilder::primary(
-        &command_buffer_allocator,
-        context.context.compute_queue().queue_family_index(),
+    let mut builder = RecordingCommandBuffer::primary(
+        command_buffer_allocator.clone(),
+        context.compute_queue().queue_family_index(),
         CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap();
@@ -131,13 +135,16 @@ fn run_compute_shader_once_then_exit(
             set,
         )
         .unwrap()
-        .dispatch([1024, 1, 1])
+        ;
+    unsafe {
+        builder.dispatch([1024, 1, 1])
         .unwrap();
-    let command_buffer = builder.build().unwrap();
+    }
+    let command_buffer = builder.end().unwrap();
 
     // Execute the command buffer & wait on it to finish
-    let future = sync::now(context.context.device().clone())
-        .then_execute(context.context.compute_queue().clone(), command_buffer)
+    let future = sync::now(context.device().clone())
+        .then_execute(context.compute_queue().clone(), command_buffer)
         .unwrap()
         .then_signal_fence_and_flush()
         .unwrap();
