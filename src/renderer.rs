@@ -1,8 +1,8 @@
 // A heavily tweaked VulkanoWindowRenderer. To find the changes, you can ctrl f tweak.
 
-use bevy::{utils::HashMap, window::WindowWrapper};
-use vulkano_util::{context::VulkanoContext, window::WindowDescriptor};
-use std::{ops::Deref, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
+
+use bevy::utils::HashMap;
 use vulkano::{
     device::{Device, Queue},
     format::Format,
@@ -12,6 +12,7 @@ use vulkano::{
     sync::{self, GpuFuture},
     Validated, VulkanError,
 };
+use vulkano_util::context::VulkanoContext;
 use winit::window::Window;
 
 // There is no way to get an arc, or a window wrapper, or anything from bevy winit. Greedy plugin. At best we can borrow from it.
@@ -48,7 +49,7 @@ impl VulkanoWindowRendererWithoutWindow {
         // Create swap chain & frame(s) to which we'll render
         let (swap_chain, final_views) = VulkanoWindowRenderer::create_swapchain(
             vulkano_context.device().clone(),
-            &window,
+            window,
             present_mode,
             swapchain_create_info_modify,
         );
@@ -81,12 +82,15 @@ pub struct VulkanoWindowRenderer<'a, 'b> {
     // tweak
     window: &'a Window,
     // tweak
-    without_window: &'b mut VulkanoWindowRendererWithoutWindow
+    without_window: &'b mut VulkanoWindowRendererWithoutWindow,
 }
 
 impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
     // tweak
-    pub fn new(window: &'a Window, without_window: &'b mut VulkanoWindowRendererWithoutWindow) -> Self {
+    pub fn new(
+        window: &'a Window,
+        without_window: &'b mut VulkanoWindowRendererWithoutWindow,
+    ) -> Self {
         Self {
             window,
             without_window,
@@ -104,7 +108,8 @@ impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
     ) -> (Arc<Swapchain>, Vec<Arc<ImageView>>) {
         // tweak
         // I think this is safe?
-        let surface = unsafe { Surface::from_window_ref(device.instance().clone(), window.deref()).unwrap() };
+        let surface =
+            unsafe { Surface::from_window_ref(device.instance().clone(), window).unwrap() };
         let surface_capabilities = device
             .physical_device()
             .surface_capabilities(&surface, Default::default())
@@ -127,7 +132,7 @@ impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
                     .unwrap(),
                 ..Default::default()
             };
-            
+
             // tweak
             create_info.present_mode = present_mode;
             swapchain_create_info_modify(&mut create_info);
@@ -184,7 +189,7 @@ impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
     /// Winit window (you can manipulate the window through this).
     #[inline]
     pub fn window(&self) -> &Window {
-        &self.window
+        self.window
     }
 
     /// Size of the physical window.
@@ -261,13 +266,19 @@ impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
             .unwrap(),
         )
         .unwrap();
-        self.without_window.additional_image_views.insert(key, image);
+        self.without_window
+            .additional_image_views
+            .insert(key, image);
     }
 
     /// Get additional image view by key.
     #[inline]
     pub fn get_additional_image_view(&mut self, key: usize) -> Arc<ImageView> {
-        self.without_window.additional_image_views.get(&key).unwrap().clone()
+        self.without_window
+            .additional_image_views
+            .get(&key)
+            .unwrap()
+            .clone()
     }
 
     /// Remove additional image by key.
@@ -313,7 +324,12 @@ impl<'a, 'b> VulkanoWindowRenderer<'a, 'b> {
         // Update our image index
         self.without_window.image_index = image_index;
 
-        let future = self.without_window.previous_frame_end.take().unwrap().join(acquire_future);
+        let future = self
+            .without_window
+            .previous_frame_end
+            .take()
+            .unwrap()
+            .join(acquire_future);
 
         Ok(future.boxed())
     }

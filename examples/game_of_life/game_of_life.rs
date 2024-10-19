@@ -14,8 +14,8 @@ use rand::Rng;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, RecordingCommandBuffer, CommandBufferUsage,
-        PrimaryAutoCommandBuffer,
+        allocator::StandardCommandBufferAllocator, CommandBufferUsage, PrimaryAutoCommandBuffer,
+        RecordingCommandBuffer,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
@@ -220,8 +220,9 @@ impl GameOfLifeComputePipeline {
             .unwrap();
 
         unsafe {
-            builder.dispatch([img_dims[0] / 8, img_dims[1] / 8, 1])
-            .unwrap();
+            builder
+                .dispatch([img_dims[0] / 8, img_dims[1] / 8, 1])
+                .unwrap();
         }
     }
 }

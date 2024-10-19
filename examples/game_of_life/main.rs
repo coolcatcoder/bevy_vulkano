@@ -7,12 +7,10 @@ mod place_over_frame;
 use std::time::Duration;
 
 use bevy::{
-    app::PluginGroupBuilder,
-    prelude::*,
-    time::common_conditions::on_timer,
-    window::WindowMode, winit::WakeUp,
+    app::PluginGroupBuilder, prelude::*, time::common_conditions::on_timer, window::WindowMode,
+    winit::WakeUp,
 };
-use bevy_vulkano::{BevyVulkanoContext, VulkanoRenderers, VulkanoPlugin};
+use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin, VulkanoRenderers};
 
 use crate::{game_of_life::GameOfLifeComputePipeline, place_over_frame::RenderPassPlaceOverFrame};
 
@@ -128,12 +126,10 @@ fn game_of_life_pipeline_system(
     mut place_over_frame: ResMut<RenderPassPlaceOverFrame>,
 ) {
     if let Ok(window_entity) = window_query.get_single() {
-        let mut primary_window = renderers
-            .get_renderer(window_entity)
-            .unwrap();
+        let mut primary_window = renderers.get_renderer(window_entity).unwrap();
 
         // Start frame
-        let before = match primary_window.acquire(None, |_|{}) {
+        let before = match primary_window.acquire(None, |_| {}) {
             Err(e) => {
                 bevy::log::error!("Failed to start frame: {}", e);
                 return;

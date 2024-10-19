@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use vulkano::{
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, RecordingCommandBuffer, CommandBufferUsage,
+        allocator::StandardCommandBufferAllocator, CommandBufferUsage, RecordingCommandBuffer,
         RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
     },
     device::{DeviceOwned, Queue},

@@ -5,7 +5,7 @@ use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin};
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, RecordingCommandBuffer, CommandBufferUsage,
+        allocator::StandardCommandBufferAllocator, CommandBufferUsage, RecordingCommandBuffer,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
@@ -102,11 +102,15 @@ fn run_compute_shader_once_then_exit(
     )
     .unwrap();
 
-    let command_buffer_allocator =
-        Arc::new(StandardCommandBufferAllocator::new(context.device().clone(), Default::default()));
+    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
+        context.device().clone(),
+        Default::default(),
+    ));
 
-    let descriptor_set_allocator =
-        Arc::new(StandardDescriptorSetAllocator::new(context.device().clone(), Default::default()));
+    let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+        context.device().clone(),
+        Default::default(),
+    ));
 
     // Create pipeline layout & descriptor set (data inputs)
     let layout = pipeline.layout().set_layouts().first().unwrap();
@@ -134,11 +138,9 @@ fn run_compute_shader_once_then_exit(
             0,
             set,
         )
-        .unwrap()
-        ;
-    unsafe {
-        builder.dispatch([1024, 1, 1])
         .unwrap();
+    unsafe {
+        builder.dispatch([1024, 1, 1]).unwrap();
     }
     let command_buffer = builder.end().unwrap();
 

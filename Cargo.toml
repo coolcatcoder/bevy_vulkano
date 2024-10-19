@@ -43,7 +43,7 @@ links = ["gui", "egui_winit_vulkano/links"]
 clipboard = ["gui", "egui_winit_vulkano/clipboard"]
 
 [dependencies]
-egui_winit_vulkano = { version = "0.27", optional = true, default_features = false, features = [] }
+egui_winit_vulkano = { version = "0.27", optional = true, default-features = false, features = [] }
 vulkano = { git = "https://github.com/vulkano-rs/vulkano" }
 vulkano-shaders = { git = "https://github.com/vulkano-rs/vulkano" }
 vulkano-util = { git = "https://github.com/vulkano-rs/vulkano" }

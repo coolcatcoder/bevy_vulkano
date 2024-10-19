@@ -13,7 +13,7 @@ use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
         allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
-        RecordingCommandBuffer, CommandBufferInheritanceInfo, CommandBufferUsage,
+        CommandBufferInheritanceInfo, CommandBufferUsage, RecordingCommandBuffer,
         SecondaryAutoCommandBuffer,
     },
     descriptor_set::{
@@ -133,9 +133,7 @@ impl PixelsDrawPipeline {
                 .expect("failed to create shader module")
                 .entry_point("main")
                 .expect("shader entry point not found");
-            let vertex_input_state = PosVertex::per_vertex()
-                .definition(&vs)
-                .unwrap();
+            let vertex_input_state = PosVertex::per_vertex().definition(&vs).unwrap();
             let stages = [
                 PipelineShaderStageCreateInfo::new(vs),
                 PipelineShaderStageCreateInfo::new(fs),
@@ -251,10 +249,11 @@ impl PixelsDrawPipeline {
             .bind_index_buffer(self.indices.clone())
             .unwrap();
 
-            unsafe {
-                builder.draw_indexed(self.indices.len() as u32, 1, 0, 0, 0)
-            .unwrap();
-            }
+        unsafe {
+            builder
+                .draw_indexed(self.indices.len() as u32, 1, 0, 0, 0)
+                .unwrap();
+        }
 
         builder.end().unwrap()
     }
