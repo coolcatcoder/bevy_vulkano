@@ -14,11 +14,11 @@ use rand::Rng;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        allocator::StandardCommandBufferAllocator, RecordingCommandBuffer, CommandBufferUsage,
         PrimaryAutoCommandBuffer,
     },
     descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
     device::{DeviceOwned, Queue},
     format::Format,
@@ -40,8 +40,8 @@ use vulkano::{
 #[derive(Resource)]
 pub struct GameOfLifeComputePipeline {
     compute_queue: Arc<Queue>,
-    command_buffer_allocator: StandardCommandBufferAllocator,
-    descriptor_set_allocator: StandardDescriptorSetAllocator,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     compute_life_pipeline: Arc<ComputePipeline>,
     life_in: Subbuffer<[u32]>,
     life_out: Subbuffer<[u32]>,
@@ -118,14 +118,14 @@ impl GameOfLifeComputePipeline {
 
         GameOfLifeComputePipeline {
             compute_queue,
-            command_buffer_allocator: StandardCommandBufferAllocator::new(
+            command_buffer_allocator: Arc::new(StandardCommandBufferAllocator::new(
                 allocator.device().clone(),
                 Default::default(),
-            ),
-            descriptor_set_allocator: StandardDescriptorSetAllocator::new(
+            )),
+            descriptor_set_allocator: Arc::new(StandardDescriptorSetAllocator::new(
                 allocator.device().clone(),
                 Default::default(),
-            ),
+            )),
             compute_life_pipeline,
             life_in,
             life_out,
@@ -153,8 +153,8 @@ impl GameOfLifeComputePipeline {
         life_color: [f32; 4],
         dead_color: [f32; 4],
     ) -> Box<dyn GpuFuture> {
-        let mut builder = AutoCommandBufferBuilder::primary(
-            &self.command_buffer_allocator,
+        let mut builder = RecordingCommandBuffer::primary(
+            self.command_buffer_allocator.clone(),
             self.compute_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
@@ -169,7 +169,7 @@ impl GameOfLifeComputePipeline {
         // Then color based on the next state
         self.dispatch(&mut builder, life_color, dead_color, 1);
 
-        let command_buffer = builder.build().unwrap();
+        let command_buffer = builder.end().unwrap();
         let finished = before_future
             .then_execute(self.compute_queue.clone(), command_buffer)
             .unwrap();
@@ -184,7 +184,7 @@ impl GameOfLifeComputePipeline {
     /// Build the command for a dispatch.
     fn dispatch(
         &mut self,
-        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        builder: &mut RecordingCommandBuffer<PrimaryAutoCommandBuffer>,
         life_color: [f32; 4],
         dead_color: [f32; 4],
         // Step determines whether we color or compute life (see branch in the shader)s
@@ -194,8 +194,8 @@ impl GameOfLifeComputePipeline {
         let img_dims = self.image.image().extent();
         let pipeline_layout = self.compute_life_pipeline.layout();
         let desc_layout = pipeline_layout.set_layouts().first().unwrap();
-        let set = PersistentDescriptorSet::new(
-            &self.descriptor_set_allocator,
+        let set = DescriptorSet::new(
+            self.descriptor_set_allocator.clone(),
             desc_layout.clone(),
             [
                 WriteDescriptorSet::image_view(0, self.image.clone()),
@@ -217,9 +217,12 @@ impl GameOfLifeComputePipeline {
             .bind_descriptor_sets(PipelineBindPoint::Compute, pipeline_layout.clone(), 0, set)
             .unwrap()
             .push_constants(pipeline_layout.clone(), 0, push_constants)
-            .unwrap()
-            .dispatch([img_dims[0] / 8, img_dims[1] / 8, 1])
             .unwrap();
+
+        unsafe {
+            builder.dispatch([img_dims[0] / 8, img_dims[1] / 8, 1])
+            .unwrap();
+        }
     }
 }
 

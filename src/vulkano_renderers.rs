@@ -1,7 +1,7 @@
 use bevy::{ecs::{entity::EntityHashMap, system::SystemParam}, prelude::*, window::{PresentMode, WindowClosing, WindowCreated, WindowMode}, winit::WinitWindows};
 use vulkano_util::context::VulkanoContext;
 
-use crate::renderer::{VulkanoWindowRenderer, VulkanoWindowRendererWithoutWindow};
+use crate::{renderer::{VulkanoWindowRenderer, VulkanoWindowRendererWithoutWindow}, BevyVulkanoContext};
 
 #[derive(SystemParam)]
 pub struct VulkanoRenderers<'w> {
@@ -19,7 +19,7 @@ impl<'w> VulkanoRenderers<'w> {
 }
 
 /// When a window is created, we hook vulkano into it.
-pub fn create_renderer(context: NonSend<VulkanoContext>, mut renderers: VulkanoRenderers, mut windows_created: EventReader<WindowCreated>, windows: Query<&Window>) {
+pub fn create_renderer(context: Res<BevyVulkanoContext>, mut renderers: VulkanoRenderers, mut windows_created: EventReader<WindowCreated>, windows: Query<&Window>) {
     for window_created in windows_created.read() {
         let window_entity = window_created.window;
 

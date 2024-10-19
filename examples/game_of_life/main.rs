@@ -10,9 +10,9 @@ use bevy::{
     app::PluginGroupBuilder,
     prelude::*,
     time::common_conditions::on_timer,
-    window::{WindowMode},
+    window::WindowMode, winit::WakeUp,
 };
-use bevy_vulkano::{BevyVulkanoContext, BevyVulkanoWindows, VulkanoWinitPlugin};
+use bevy_vulkano::{BevyVulkanoContext, VulkanoRenderers, VulkanoPlugin};
 
 use crate::{game_of_life::GameOfLifeComputePipeline, place_over_frame::RenderPassPlaceOverFrame};
 
@@ -29,10 +29,11 @@ impl PluginGroup for PluginBundle {
             .add(bevy::time::TimePlugin)
             .add(bevy::diagnostic::DiagnosticsPlugin)
             .add(bevy::input::InputPlugin)
+            // Don't need render, but you will need these plugins:
+            .add(bevy::a11y::AccessibilityPlugin)
             .add(bevy::window::WindowPlugin::default())
-            // Don't add WinitPlugin. This owns "core loop" (runner).
-            // Bevy winit and render should be excluded
-            .add(VulkanoWinitPlugin)
+            .add(bevy::winit::WinitPlugin::<WakeUp>::default())
+            .add(VulkanoPlugin)
     }
 }
 
@@ -72,21 +73,21 @@ fn create_pipelines(
     mut commands: Commands,
     window_query: Query<Entity, With<Window>>,
     context: Res<BevyVulkanoContext>,
-    windows: NonSend<BevyVulkanoWindows>,
+    mut renderers: VulkanoRenderers,
 ) {
     let window_entity = window_query.single();
-    let primary_window = windows.get_vulkano_window(window_entity).unwrap();
+    let primary_window = renderers.get_renderer(window_entity).unwrap();
     // Create compute pipeline to simulate game of life
     let game_of_life_pipeline = GameOfLifeComputePipeline::new(
-        context.context.memory_allocator(),
-        primary_window.renderer.graphics_queue(),
+        context.memory_allocator(),
+        primary_window.graphics_queue(),
         [512, 512],
     );
     // Create our render pass
     let place_over_frame = RenderPassPlaceOverFrame::new(
-        context.context.memory_allocator().clone(),
-        primary_window.renderer.graphics_queue(),
-        primary_window.renderer.swapchain_format(),
+        context.memory_allocator().clone(),
+        primary_window.graphics_queue(),
+        primary_window.swapchain_format(),
     );
     // Insert resources
     commands.insert_resource(game_of_life_pipeline);
@@ -122,17 +123,17 @@ fn draw_life_system(
 /// `PipelineSyncData` to update futures. You could have `pre_render_system` and `post_render_system` to start and finish frames
 fn game_of_life_pipeline_system(
     window_query: Query<Entity, With<Window>>,
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut renderers: VulkanoRenderers,
     mut game_of_life: ResMut<GameOfLifeComputePipeline>,
     mut place_over_frame: ResMut<RenderPassPlaceOverFrame>,
 ) {
     if let Ok(window_entity) = window_query.get_single() {
-        let primary_window = vulkano_windows
-            .get_vulkano_window_mut(window_entity)
+        let mut primary_window = renderers
+            .get_renderer(window_entity)
             .unwrap();
 
         // Start frame
-        let before = match primary_window.renderer.acquire() {
+        let before = match primary_window.acquire(None, |_|{}) {
             Err(e) => {
                 bevy::log::error!("Failed to start frame: {}", e);
                 return;
@@ -142,10 +143,10 @@ fn game_of_life_pipeline_system(
 
         let after_compute = game_of_life.compute(before, [1.0, 0.0, 0.0, 1.0], [0.0; 4]);
         let color_image = game_of_life.color_image();
-        let final_image = primary_window.renderer.swapchain_image_view();
+        let final_image = primary_window.swapchain_image_view();
         let after_render = place_over_frame.render(after_compute, color_image, final_image);
 
         // Finish Frame
-        primary_window.renderer.present(after_render, true);
+        primary_window.present(after_render, true);
     }
 }

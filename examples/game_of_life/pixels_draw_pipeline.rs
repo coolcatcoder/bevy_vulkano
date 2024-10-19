@@ -13,11 +13,11 @@ use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
         allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
-        AutoCommandBufferBuilder, CommandBufferInheritanceInfo, CommandBufferUsage,
+        RecordingCommandBuffer, CommandBufferInheritanceInfo, CommandBufferUsage,
         SecondaryAutoCommandBuffer,
     },
     descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
     device::{DeviceOwned, Queue},
     image::{
@@ -79,8 +79,8 @@ pub fn pos_quad(width: f32, height: f32) -> (Vec<PosVertex>, Vec<u32>) {
 /// A subpass pipeline that fills a quad over frame
 pub struct PixelsDrawPipeline {
     gfx_queue: Arc<Queue>,
-    command_buffer_allocator: StandardCommandBufferAllocator,
-    descriptor_set_allocator: StandardDescriptorSetAllocator,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     pipeline: Arc<GraphicsPipeline>,
     subpass: Subpass,
     vertices: Subbuffer<[PosVertex]>,
@@ -134,7 +134,7 @@ impl PixelsDrawPipeline {
                 .entry_point("main")
                 .expect("shader entry point not found");
             let vertex_input_state = PosVertex::per_vertex()
-                .definition(&vs.info().input_interface)
+                .definition(&vs)
                 .unwrap();
             let stages = [
                 PipelineShaderStageCreateInfo::new(vs),
@@ -180,8 +180,8 @@ impl PixelsDrawPipeline {
             StandardDescriptorSetAllocator::new(allocator.device().clone(), Default::default());
         PixelsDrawPipeline {
             gfx_queue,
-            command_buffer_allocator,
-            descriptor_set_allocator,
+            command_buffer_allocator: Arc::new(command_buffer_allocator),
+            descriptor_set_allocator: Arc::new(descriptor_set_allocator),
             pipeline,
             subpass,
             vertices: vertex_buffer,
@@ -189,7 +189,7 @@ impl PixelsDrawPipeline {
         }
     }
 
-    fn create_image_sampler_nearest(&self, image: Arc<ImageView>) -> Arc<PersistentDescriptorSet> {
+    fn create_image_sampler_nearest(&self, image: Arc<ImageView>) -> Arc<DescriptorSet> {
         let layout = self.pipeline.layout().set_layouts().first().unwrap();
         let sampler = Sampler::new(self.gfx_queue.device().clone(), SamplerCreateInfo {
             mag_filter: Filter::Nearest,
@@ -199,8 +199,8 @@ impl PixelsDrawPipeline {
             ..Default::default()
         })
         .unwrap();
-        PersistentDescriptorSet::new(
-            &self.descriptor_set_allocator,
+        DescriptorSet::new(
+            self.descriptor_set_allocator.clone(),
             layout.clone(),
             [WriteDescriptorSet::image_view_sampler(0, image, sampler)],
             [],
@@ -214,8 +214,8 @@ impl PixelsDrawPipeline {
         viewport_dimensions: [u32; 2],
         image: Arc<ImageView>,
     ) -> Arc<SecondaryAutoCommandBuffer> {
-        let mut builder = AutoCommandBufferBuilder::secondary(
-            &self.command_buffer_allocator,
+        let mut builder = RecordingCommandBuffer::secondary(
+            self.command_buffer_allocator.clone(),
             self.gfx_queue.queue_family_index(),
             CommandBufferUsage::MultipleSubmit,
             CommandBufferInheritanceInfo {
@@ -249,10 +249,14 @@ impl PixelsDrawPipeline {
             .bind_vertex_buffers(0, self.vertices.clone())
             .unwrap()
             .bind_index_buffer(self.indices.clone())
-            .unwrap()
-            .draw_indexed(self.indices.len() as u32, 1, 0, 0, 0)
             .unwrap();
-        builder.build().unwrap()
+
+            unsafe {
+                builder.draw_indexed(self.indices.len() as u32, 1, 0, 0, 0)
+            .unwrap();
+            }
+
+        builder.end().unwrap()
     }
 }
 
