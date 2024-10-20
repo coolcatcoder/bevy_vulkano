@@ -14,8 +14,8 @@ use rand::Rng;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        RecordingCommandBuffer,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        PrimaryAutoCommandBuffer,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
@@ -153,7 +153,7 @@ impl GameOfLifeComputePipeline {
         life_color: [f32; 4],
         dead_color: [f32; 4],
     ) -> Box<dyn GpuFuture> {
-        let mut builder = RecordingCommandBuffer::primary(
+        let mut builder = AutoCommandBufferBuilder::primary(
             self.command_buffer_allocator.clone(),
             self.compute_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
@@ -169,7 +169,7 @@ impl GameOfLifeComputePipeline {
         // Then color based on the next state
         self.dispatch(&mut builder, life_color, dead_color, 1);
 
-        let command_buffer = builder.end().unwrap();
+        let command_buffer = builder.build().unwrap();
         let finished = before_future
             .then_execute(self.compute_queue.clone(), command_buffer)
             .unwrap();
@@ -184,7 +184,7 @@ impl GameOfLifeComputePipeline {
     /// Build the command for a dispatch.
     fn dispatch(
         &mut self,
-        builder: &mut RecordingCommandBuffer<PrimaryAutoCommandBuffer>,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         life_color: [f32; 4],
         dead_color: [f32; 4],
         // Step determines whether we color or compute life (see branch in the shader)s

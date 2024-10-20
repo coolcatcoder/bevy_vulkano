@@ -1,4 +1,4 @@
-use bevy::{app::PluginGroupBuilder, ecs::entity::EntityHashMap, prelude::*};
+use bevy::{ecs::entity::EntityHashMap, prelude::*};
 use renderer::VulkanoWindowRendererWithoutWindow;
 use vulkano_renderers::{create_renderer, destroy_renderer, resize, update_present_mode};
 use vulkano_util::context::VulkanoContext;

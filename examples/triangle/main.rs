@@ -1,11 +1,15 @@
 use std::{sync::Arc, time::Duration};
 
-use bevy::{a11y::AccessibilityPlugin, core_pipeline::CorePipelinePlugin, prelude::*, render::{pipelined_rendering::PipelinedRenderingPlugin, RenderPlugin}, winit::{WakeUp, WinitPlugin}};
+use bevy::{
+    a11y::AccessibilityPlugin,
+    prelude::*,
+    winit::{WakeUp, WinitPlugin},
+};
 use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin, VulkanoRenderers};
 use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, CommandBufferUsage, RecordingCommandBuffer,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
     },
     image::view::ImageView,
@@ -251,7 +255,7 @@ fn render(
         })
         .unwrap();
 
-    let mut builder = RecordingCommandBuffer::primary(
+    let mut builder = AutoCommandBufferBuilder::primary(
         stuff.command_buffer_allocator.clone(),
         context.graphics_queue().queue_family_index(),
         CommandBufferUsage::OneTimeSubmit,
@@ -316,7 +320,7 @@ fn render(
         .unwrap();
 
     // Finish recording the command buffer by calling `end`.
-    let command_buffer = builder.end().unwrap();
+    let command_buffer = builder.build().unwrap();
 
     let future = previous_frame_end
         .then_execute(context.graphics_queue().clone(), command_buffer)

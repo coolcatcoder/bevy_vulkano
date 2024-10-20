@@ -5,7 +5,7 @@ use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin};
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, CommandBufferUsage, RecordingCommandBuffer,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
@@ -16,8 +16,7 @@ use vulkano::{
         ComputePipeline, Pipeline, PipelineBindPoint, PipelineLayout,
         PipelineShaderStageCreateInfo,
     },
-    sync,
-    sync::GpuFuture,
+    sync::{self, GpuFuture},
 };
 
 // https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/basic-compute-shader.rs
@@ -123,7 +122,7 @@ fn run_compute_shader_once_then_exit(
     .unwrap();
 
     // Build command buffer
-    let mut builder = RecordingCommandBuffer::primary(
+    let mut builder = AutoCommandBufferBuilder::primary(
         command_buffer_allocator.clone(),
         context.compute_queue().queue_family_index(),
         CommandBufferUsage::OneTimeSubmit,
@@ -142,7 +141,7 @@ fn run_compute_shader_once_then_exit(
     unsafe {
         builder.dispatch([1024, 1, 1]).unwrap();
     }
-    let command_buffer = builder.end().unwrap();
+    let command_buffer = builder.build().unwrap();
 
     // Execute the command buffer & wait on it to finish
     let future = sync::now(context.device().clone())
