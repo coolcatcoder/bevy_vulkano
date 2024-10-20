@@ -97,8 +97,6 @@ pub fn resize(mut renderers: VulkanoRenderers, mut resized_windows: EventReader<
         };
 
         renderer.resize();
-
-        info!("blah");
     }
 }
 

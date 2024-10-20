@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use bevy::prelude::*;
-use bevy_vulkano::{BevyVulkanoContext, VulkanoDefaultPlugins, VulkanoRenderers};
+use bevy::{a11y::AccessibilityPlugin, core_pipeline::CorePipelinePlugin, prelude::*, render::{pipelined_rendering::PipelinedRenderingPlugin, RenderPlugin}, winit::{WakeUp, WinitPlugin}};
+use bevy_vulkano::{BevyVulkanoContext, VulkanoPlugin, VulkanoRenderers};
 use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -29,7 +29,12 @@ use vulkano::{
 
 fn main() {
     App::new()
-        .add_plugins(VulkanoDefaultPlugins)
+        .add_plugins((
+            AccessibilityPlugin,
+            WindowPlugin::default(),
+            WinitPlugin::<WakeUp>::default(),
+            VulkanoPlugin,
+        ))
         .add_systems(Startup, setup)
         .add_systems(Update, render)
         .run();
@@ -281,11 +286,16 @@ fn render(
         // We are now inside the first subpass of the render pass.
         //
         // TODO: Document state setting and how it affects subsequent draw commands.
-        .set_viewport(0, [Viewport {
-            offset: [0.; 2],
-            extent: renderer.window_size(),
-            depth_range: 0.0..=1.
-        }].into_iter().collect())
+        .set_viewport(
+            0,
+            [Viewport {
+                offset: [0.; 2],
+                extent: renderer.window_size(),
+                depth_range: 0.0..=1.,
+            }]
+            .into_iter()
+            .collect(),
+        )
         .unwrap()
         .bind_pipeline_graphics(stuff.pipeline.clone())
         .unwrap()

@@ -1,3 +1,11 @@
+// TODO: Fix this.
+
+// Temp, to get rid of the "no main" error.
+fn main() {
+    todo!()
+}
+
+/*
 use bevy::{
     app::PluginGroupBuilder,
     prelude::*,
@@ -90,3 +98,4 @@ pub fn main_render_system_primary_window(
         }
     }
 }
+*/
