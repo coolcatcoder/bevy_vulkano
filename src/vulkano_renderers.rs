@@ -23,6 +23,17 @@ impl<'w> VulkanoRenderers<'w> {
 
         Some(VulkanoWindowRenderer::new(window, renderer))
     }
+
+    pub fn get_renderer_single(&mut self) -> Option<VulkanoWindowRenderer> {
+        if self.windows.windows.len() > 1 || self.renderers.len() > 1 {
+            None
+        } else {
+            let (_, window) = self.windows.windows.iter().next()?;
+            let (_, renderer) = self.renderers.iter_mut().next()?;
+
+            Some(VulkanoWindowRenderer::new(window, renderer))
+        }
+    }
 }
 
 /// When a window is created, we hook vulkano into it.
@@ -78,10 +89,7 @@ pub fn update_present_mode(
     }
 }
 
-pub fn resize(
-    mut renderers: VulkanoRenderers,
-    mut resized_windows: EventReader<WindowResized>,
-) {
+pub fn resize(mut renderers: VulkanoRenderers, mut resized_windows: EventReader<WindowResized>) {
     for resized_window in resized_windows.read() {
         let Some(mut renderer) = renderers.get_renderer(resized_window.window) else {
             error!("A window was found without a renderer!");
@@ -89,6 +97,8 @@ pub fn resize(
         };
 
         renderer.resize();
+
+        info!("blah");
     }
 }
 
